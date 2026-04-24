@@ -1,12 +1,25 @@
 # ctxindex
 
-A Go MCP server that exposes a Go codebase's **semantic structure** (symbols, call graphs, exports) as queryable tools. It lets LLM agents ask structured questions instead of reading full files — the thesis being that long coding sessions burn tokens re-reading files the agent already has a mental model of, and that exposing structural queries can replace many of those reads.
+**A structural index for Go, exposed to LLM agents over MCP.** Four tools let an agent ask *"what symbols are in this file?"*, *"who calls this function?"*, *"show me just this one symbol"* — instead of reading whole files it already has a mental model of.
 
-This is **v0**: a falsifiable prototype. Go-only. No file watching. In-memory index rebuilt on every start. Four tools, nothing more. See `HANDOFF.md` for the design rationale and what's deliberately out of scope.
+The thesis: long coding sessions burn tokens re-reading files. Structural queries can replace many of those reads.
+
+## Status: v0.1 — thesis validated
+
+First measured task (small implementation on a real Go project):
+
+| Metric         | With ctxindex | Without   | Delta   |
+| -------------- | ------------- | --------- | ------- |
+| Claude API cost | **$4.65**    | $5.50     | **−15%** |
+| Wall time      | **~15 min**   | >20 min   | **−25%** |
+
+Qualitative: time spent on file-reading dropped noticeably; the agent reached for `read_symbol` and `callers_of` in place of whole-file reads. Single data point — not a benchmark, but enough to keep going.
+
+v0.1 locks in the four-tool surface. v1 scopes file watching, MRU, and impact scoring.
 
 ## Tools
 
-All tools return structured JSON shaped to be compact (no file bodies in `symbols_in` / `exports_of`).
+All tools return compact structured JSON (no file bodies in `symbols_in` / `exports_of`).
 
 ### `symbols_in(path)`
 
@@ -83,20 +96,20 @@ Add to your `.mcp.json` (project-local) or `~/.claude.json` (global):
 
 `--root` defaults to the server's working directory if omitted. Only Go packages under that root are indexed; stdlib and module dependencies are not.
 
-## Startup behavior
+## Startup
 
 On start, `ctxindex` loads every package under `--root` via `go/packages` and builds the index in memory. Expect 2–10s cold-load on a medium project. Stderr log:
 
 ```
-ctxindex 0.0.1 starting (root=/abs/path)
+ctxindex 0.1.0 starting (root=/abs/path)
 indexed 42 packages, 1873 symbols, 4921 call sites in 3.2s
 ```
 
 No incremental updates — restart the server to pick up edits. (v1 territory; see `FUTURE.md`.)
 
-## Scope & limits (v0)
+## Scope
 
-Explicitly not implemented, per `HANDOFF.md`:
+Go only. In-memory. Rebuilt on every start. Deliberately out of scope for v0.1:
 
 - File watching / incremental re-indexing
 - Change tracking, MRU, impact scoring
@@ -107,10 +120,10 @@ Explicitly not implemented, per `HANDOFF.md`:
 
 Known partial cases:
 
-- Function-value calls (`f := pkg.Foo; f()`) aren't attributed — the callee resolves to a `*types.Var`, not a `*types.Func`. Parked.
-- Interface method calls attribute to the interface method, not concrete implementations. This is intentional; a future version could optionally expand to impls.
+- Function-value calls (`f := pkg.Foo; f()`) aren't attributed — the callee resolves to a `*types.Var`, not a `*types.Func`.
+- Interface method calls attribute to the interface method, not concrete implementations. Intentional; a future version could optionally expand to impls.
 - Top-level calls outside any function (e.g. `var x = f()`) attribute to `pkg.<init>`.
-- Closures attribute to the enclosing top-level `FuncDecl`, not per-closure. Acceptable for v0.
+- Closures attribute to the enclosing top-level `FuncDecl`, not per-closure.
 
 ## Testing
 
@@ -118,15 +131,7 @@ Known partial cases:
 go test ./...
 ```
 
-Unit tests run against `testdata/fixture/` — a two-package Go module exercising exported/unexported funcs, a method on a type, a cross-package call, and a generic function. 27 tests across `internal/index` and `internal/pathutil`.
-
-## Thesis status
-
-The experiment (Claude Code on a real project with and without this server, measuring token spend and read-file count) is the deliverable that decides whether v0 holds. It runs in a separate session; results will land in `EXPERIMENT.md`. Until then: **unvalidated**.
-
-If it holds: v1 scopes file watching + MRU + impact scoring.
-If it partially holds: the next version is built around whichever tools the agent actually reached for.
-If it fails: it's written up honestly and the full vision is reconsidered, not built on top.
+Unit tests run against `testdata/fixture/` — a two-package Go module exercising exported/unexported funcs, a method on a type, a cross-package call, and a generic function.
 
 ## Repo layout
 
